@@ -9,7 +9,8 @@ def sign(x):
     return copysign(1, x)
 
 
-def ray_line(ray_start: pg.Vector2, ray_dir: pg.Vector2, line: tuple[pg.Vector2, pg.Vector2], max_dist: float = float("Inf")):
+def ray_line(ray_start: pg.Vector2, ray_dir: pg.Vector2, line: tuple[pg.Vector2, pg.Vector2],
+             max_dist: float = float("Inf")):
     if line[0] == line[1]:
         return -1
     q = line[0].copy()
@@ -42,30 +43,6 @@ def ray_rect(ray_start: pg.Vector2, ray_dir: pg.Vector2, rect: pg.Rect, max_dist
     if dist == float("Inf"):
         dist = -1
     return dist
-
-
-"""
-def ray_rect(origin: pg.Vector2, direction: pg.Vector2, rect: pg.Rect) -> float | Literal[-1]:
-    corners: tuple[pg.Vector2, pg.Vector2,
-                   pg.Vector2, pg.Vector2] = (pg.Vector2(rect.topleft), pg.Vector2(rect.topright),
-                                              pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright))
-    ray_target: pg.Vector2 = origin + direction
-    ray_side: pg.Vector2 = pg.Vector2(ray_target.y - origin.y, origin.x - ray_target.x)
-    old_dot = None
-    for corner in corners:
-        dot: float = sign(ray_side * (corner - origin))
-        if old_dot is not None:
-            if dot != old_dot:
-                return -1
-        else:
-            old_dot = dot
-    rel_origin: pg.Vector2 = pg.Vector2(abs(origin.x), abs(origin.y)) - rect.center - pg.Vector2(rect.size) / 2
-    slope_to_corner: float = (-rel_origin.y) / (-rel_origin.x)
-    slope: float = direction.y / direction.x
-    vertical_side: bool = slope > slope_to_corner
-    dst_to_side: float = rel_origin.x if vertical_side else rel_origin.y
-    hit_rel: pg.Vector2 = pg.Vector2(dst_to_side, dst_to_side * (slope if vertical_side else 1/slope))
-    return hit_rel.length()"""
 
 
 def rect_sdf(rect: pg.Rect, pos: pg.Vector2):
@@ -114,18 +91,18 @@ def ray_scene(ray_origin, ray_direction, walls, max_distance: int = 1000):
 
 
 class Button:
-    def __init__(self, pos: pg.Vector2, ID: int, color: pg.Color|tuple[int, int, int] = pg.Color(200, 200, 200)):
+    def __init__(self, pos: pg.Vector2, id_: int, color: pg.Color | tuple[int, int, int] = pg.Color(200, 200, 200)):
         self.color = pg.Color(color)
         self.pos = pos
         self.rect = pg.Rect(pos - pg.Vector2(10, 10), (20, 20))
         self.colored_rect = pg.Rect(pos - pg.Vector2(8, 8), (16, 16))
         self.inner_rect = pg.Rect(pos - pg.Vector2(4, 4), (8, 8))
-        self.ID = ID
+        self.id = id_
         self.status = False
-        self.used =False
+        self.used = False
 
     def update(self, player, keys):
-        if player.pos.distance_squared_to(self.pos)<=100:
+        if player.pos.distance_squared_to(self.pos) <= 100:
             if not keys[pg.K_e] and self.used:
                 self.status = not self.status
                 self.used = False
@@ -133,13 +110,13 @@ class Button:
                 self.used = True
 
     def draw(self, window, camera, camera_angle):
-        pos = self.pos - (camera - pg.Vector2(window.get_size())/2 - pg.Vector2(0, 100).rotate(camera_angle))
+        pos = self.pos - (camera - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(camera_angle))
         self.rect.center = pos
         self.colored_rect.center = pos
         self.inner_rect.center = pos
         pg.draw.rect(window, self.color, self.rect, border_radius=5)
-        pg.draw.rect(window, (100, 255, 100)if self.status else (255, 100, 100), self.colored_rect, border_radius=3)
-        pg.draw.rect(window, (100, 100, 100)if self.used else(200, 200, 200), self.inner_rect, border_radius=2)
+        pg.draw.rect(window, (100, 255, 100) if self.status else (255, 100, 100), self.colored_rect, border_radius=3)
+        pg.draw.rect(window, (100, 100, 100) if self.used else (200, 200, 200), self.inner_rect, border_radius=2)
 
 
 class Wall:
@@ -147,7 +124,7 @@ class Wall:
         self.rect = rect
 
     def draw(self, window, cam_pos, cam_angle):
-        cam_pos = cam_pos - pg.Vector2(window.get_size())/2 - pg.Vector2(0, 100).rotate(cam_angle)
+        cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle)
         pg.draw.rect(window, (255, 255, 255), self.rect.move(-cam_pos.x, -cam_pos.y))
 
     def collide_circle(self, circle: tuple[pg.Vector2, float]):
@@ -164,13 +141,14 @@ class DoorMovement(Enum):
 
 
 class Door(Wall):
-    def __init__(self, rect: pg.Rect, ID, horizontal: bool, color: pg.Color|tuple[int, int, int] = pg.Color(200, 200, 200)):
+    def __init__(self, rect: pg.Rect, id_, horizontal: bool,
+                 color: pg.Color | tuple[int, int, int] = pg.Color(200, 200, 200)):
+        super().__init__(rect)
         self.pos = pg.Vector2(rect.x, rect.y)
         self.color = pg.Color(color)
-        self.rect = rect
         self.size = rect.size
         self.door_position = 1.0
-        self.ID = ID
+        self.ID = id_
         self.horizontal = horizontal
         self.movement = DoorMovement.STATIC
 
@@ -185,7 +163,7 @@ class Door(Wall):
             if self.door_position <= 0:
                 self.door_position = 0
                 self.movement = DoorMovement.STATIC
-        
+
         if self.horizontal:
             self.rect.width = self.size[0] * self.door_position
         else:
@@ -193,7 +171,7 @@ class Door(Wall):
 
         t: list[Button] = []
         for i in buttons:
-            if i.ID == self.ID:
+            if i.id == self.ID:
                 t.append(i)
         for i in t:
             if not i.status:
@@ -213,6 +191,7 @@ class Player:
         pg.Vector2(0, 2),
         pg.Vector2(4, 4)
     ]
+
     def __init__(self, pos, speed):
         self.pos = pos
         self.speed = speed
@@ -249,10 +228,13 @@ class Player:
                 self.pos.y -= sign(dir_.y)
 
     def draw(self, window, cam_pos, overlay, walls, cam_angle):
-        cam_pos = cam_pos - pg.Vector2(window.get_size())/2 - pg.Vector2(0, 100).rotate(cam_angle)
+        cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle)
         transformed_pos = self.pos - cam_pos
-        pg.draw.polygon(window, (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape))
-        arc_a = self.dir.rotate(-45/2)
+        pg.draw.polygon(
+            window,
+            (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
+        )
+        arc_a = self.dir.rotate(-45 / 2)
         distances = [ray_scene(self.pos, arc_a.rotate(i), walls, 250) for i in range(0, 45)]
         points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
@@ -272,6 +254,7 @@ class Guard:
         self.start_dir = self.dir.copy()
         self.rotate_frames = rotate_frames
         self.timer = 0
+        self.sees_player = False
 
     def update(self, player, walls, delta):
         self.timer += delta
@@ -284,11 +267,15 @@ class Guard:
         dist = dif.length()
         dif.normalize_ip()
 
-        self.seen = (self.dir * dif >= cos(radians(45 / 2)) and 150 >= dist == ray_scene(self.pos, dif, walls, max_distance=dist)) or dist <= 10
-        return self.seen
+        self.sees_player = (
+                (self.dir * dif >= cos(radians(45 / 2))
+                 and 150 >= dist == ray_scene(self.pos, dif, walls, max_distance=dist))
+                or dist <= 10
+        )
+        return self.sees_player
 
     def draw(self, window, light_overlay, walls, cam_pos, cam_angle):
-        pos = self.pos - (cam_pos - pg.Vector2(window.get_size())/2 - pg.Vector2(0, 100).rotate(cam_angle))
+        pos = self.pos - (cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle))
         arc_a = self.dir.rotate(-45 / 2)
         distances = [ray_scene(self.pos, arc_a.rotate(i), walls, max_distance=150) for i in range(0, 45, 2)]
         points = [pos] + [pos + arc_a.rotate(j) * distances[i] for i, j in enumerate(range(0, 45, 2))]
@@ -300,7 +287,7 @@ class Guard:
 def main():
     os_window = pg.display.set_mode(flags=pg.FULLSCREEN)
     scale_factor: int = 2
-    diagonal = ceil((pg.Vector2(os_window.get_size())/2).length())
+    diagonal = ceil((pg.Vector2(os_window.get_size()) / 2).length())
     window = pg.Surface((diagonal, diagonal))
     guard_light_overlay = pg.Surface(window.get_size())
     low_res_guard_overlay = pg.Surface(pg.Vector2(window.get_size()) / 2)
@@ -314,18 +301,21 @@ def main():
     pg.font.init()
     font = pg.font.SysFont("Arial", 12)
 
-    walls = [Wall(pg.Rect(150, 200, 400, 20)), Wall(pg.Rect(350, 250, 20, 100)), Door(pg.Rect(355, 220, 10, 30), 0, False)]
+    walls = [Wall(pg.Rect(150, 200, 400, 20)), Wall(pg.Rect(350, 250, 20, 100)),
+             Door(pg.Rect(355, 220, 10, 30), 0, False)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 235), 0)]
     player = Player(pg.Vector2(50, 50), 3)
 
     camera: pg.Vector2 = player.pos.copy()
     camera_angle: float = 0.0
+    camera_rect: pg.Rect = pg.Rect((0, 0), window.get_size())
     ms = 1
 
     pg.mouse.set_visible(False)
 
     while True:
+        camera_rect.center = camera
         keys = pg.key.get_pressed()
         for event in pg.event.get():
             if event.type == pg.QUIT or event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
@@ -369,10 +359,12 @@ def main():
         player.draw(window, camera, player_light_overlay, walls, camera_angle)
 
         pg.transform.smoothscale_by(guard_light_overlay, 0.5, dest_surface=low_res_guard_overlay)
-        pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(), dest_surface=blurred_guard_light_overlay)
+        pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(),
+                                 dest_surface=blurred_guard_light_overlay)
 
         pg.transform.smoothscale_by(player_light_overlay, 0.5, dest_surface=low_res_player_overlay)
-        pg.transform.smoothscale(low_res_player_overlay, blurred_guard_light_overlay.get_size(), dest_surface=blurred_player_light_overlay)
+        pg.transform.smoothscale(low_res_player_overlay, blurred_guard_light_overlay.get_size(),
+                                 dest_surface=blurred_player_light_overlay)
 
         window.blit(blurred_guard_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
         window.blit(blurred_player_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
@@ -380,8 +372,8 @@ def main():
         os_window.fill((255, 0, 255))
 
         rotated_window = pg.transform.rotate(window, camera_angle)
-        rotated_window_rect = pg.Rect((0, 0), pg.Vector2(os_window.get_size())/2)
-        rotated_window_rect.center = pg.Vector2(rotated_window.get_size())/2
+        rotated_window_rect = pg.Rect((0, 0), pg.Vector2(os_window.get_size()) / 2)
+        rotated_window_rect.center = pg.Vector2(rotated_window.get_size()) / 2
         pg.transform.scale_by(rotated_window.subsurface(rotated_window_rect), scale_factor, dest_surface=os_window)
         if seen:
             os_window.blit(font.render("spotted!", False, (255, 255, 255)), (0, 0))
@@ -392,4 +384,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
