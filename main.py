@@ -1,4 +1,6 @@
 from enum import Enum
+from typing import Literal
+from click import edit
 import pygame as pg
 from math import ceil, sqrt, cos, radians, copysign
 
@@ -9,15 +11,39 @@ def sign(x):
     return copysign(1, x)
 
 
-def ray_line(ray_start: pg.Vector2, ray_dir: pg.Vector2, line: tuple[pg.Vector2, pg.Vector2],
+class Ray:
+    origin: pg.Vector2
+    dir: pg.Vector2
+
+    def __init__(self, origin: pg.Vector2, dir: pg.Vector2) -> None:
+        self.origin = origin
+        self.dir = dir.normalize()
+
+
+def ray_circle(ray: Ray, center: pg.Vector2, radius: float) -> float | Literal[-1]:
+    origin = ray.origin - center
+    
+    b: float = 2*origin.dot(ray.dir)
+    c: float = origin.length_squared() - radius**2
+
+    discriminant: float = b**2 - 4*c
+    if discriminant < 0:
+        return -1
+    else:
+        t_pos = (-b+sqrt(discriminant))/2
+        t_neg = (-b-sqrt(discriminant))/2
+        return min(t_pos, t_neg)
+
+
+def ray_line(ray: Ray, line: tuple[pg.Vector2, pg.Vector2],
              max_dist: float = float("Inf")):
     if line[0] == line[1]:
         return -1
     q = line[0].copy()
     s = (line[1] - q).copy()
 
-    p = ray_start.copy()
-    r = ray_dir.copy().normalize()
+    p = ray.origin.copy()
+    r = ray.dir.copy().normalize()
 
     if s.cross(r) == 0:
         return -1
@@ -29,14 +55,14 @@ def ray_line(ray_start: pg.Vector2, ray_dir: pg.Vector2, line: tuple[pg.Vector2,
     return t
 
 
-def ray_rect(ray_start: pg.Vector2, ray_dir: pg.Vector2, rect: pg.Rect, max_dist: float = float("Inf")):
+def ray_rect(ray: Ray, rect: pg.Rect, max_dist: float = float("Inf")):
     lines = [(pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright)),
              (pg.Vector2(rect.topleft), pg.Vector2(rect.topright)),
              (pg.Vector2(rect.topright), pg.Vector2(rect.bottomright)),
              (pg.Vector2(rect.topleft), pg.Vector2(rect.bottomleft))]
     dist = max_dist
     for i in lines:
-        t = ray_line(ray_start, ray_dir, i, max_dist)
+        t = ray_line(ray, i, max_dist)
         if t == -1:
             continue
         dist = min(dist, t)
@@ -78,10 +104,10 @@ def scene_sdf(walls, pos):
     return t
 
 
-def ray_scene(ray_origin, ray_direction, walls, max_distance: int = 1000):
+def ray_scene(ray: Ray, walls, max_distance: int = 1000):
     dst = float("Inf")
     for wall in walls:
-        t = ray_rect(ray_origin, ray_direction, wall.rect, max_distance)
+        t = ray_rect(ray, wall.rect, max_distance)
         if t == -1:
             continue
         dst = min(dst, t)
@@ -240,10 +266,19 @@ class Player:
             (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
         arc_a = self.dir.rotate(-45 / 2)
-        distances = [ray_scene(self.pos, arc_a.rotate(i), walls, 250) for i in range(0, 45)]
+        distances = [ray_scene(Ray(self.pos, arc_a.rotate(i)), walls, 250) for i in range(0, 45)]
         points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
+    
+    def editor_draw(self, window, cam_pos):
+        cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2
+        transformed_pos = self.pos*2 - cam_pos
+        pg.draw.polygon(
+            window,
+            (255, 255, 100), tuple(transformed_pos + (i*2).rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
+        )
+
 
 
 class Guard:
@@ -268,7 +303,7 @@ class Guard:
 
         self.sees_player = (
                 (self.dir * dif >= cos(radians(45 / 2))
-                 and 150 >= dist == ray_scene(self.pos, dif, walls, max_distance=dist))
+                 and 150 >= dist == ray_scene(Ray(self.pos, dif), walls, max_distance=dist))
                 or dist <= 10
         )
         return self.sees_player
@@ -276,7 +311,7 @@ class Guard:
     def draw(self, window, light_overlay, walls, cam_pos, cam_angle):
         pos = self.pos - (cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle))
         arc_a = self.dir.rotate(-45 / 2)
-        distances = [ray_scene(self.pos, arc_a.rotate(i), walls, max_distance=150) for i in range(0, 45, 2)]
+        distances = [ray_scene(Ray(self.pos, arc_a.rotate(i)), walls, max_distance=150) for i in range(0, 45, 2)]
         points = [pos] + [pos + arc_a.rotate(j) * distances[i] for i, j in enumerate(range(0, 45, 2))]
         pg.draw.polygon(light_overlay, pg.Color(255, 255, 255), points)
         pg.draw.circle(window, (255, 100, 100), pos, 5)
@@ -306,12 +341,17 @@ def main():
              Door(pg.Rect(355, 220, 10, 30), 0, False)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 235), 0)]
-    player = Player(pg.Vector2(50, 50), 3)
+    player = Player(pg.Vector2(0, 0), 3)
 
     camera: pg.Vector2 = player.pos.copy()
     camera_angle: float = 0.0
     camera_rect: pg.Rect = pg.Rect((0, 0), window.get_size())
     ms = 1
+
+    editor_camera: pg.Vector2 = pg.Vector2(0, 0)
+    grid_square_overlay = pg.Surface((40, 40), pg.SRCALPHA)
+    grid_square_overlay.fill((255, 255, 255, 100))
+    pg.draw.rect(grid_square_overlay, (255, 255, 255, 255), grid_square_overlay.get_rect(), 2)
 
     pg.mouse.set_visible(False)
 
@@ -322,6 +362,12 @@ def main():
                 pg.quit()
                 return
         if mode == Mode.PLAY:
+            for event in events:
+                if event.type == pg.KEYDOWN and event.key == pg.K_e:
+                    mode = Mode.EDIT
+                    editor_camera = player.pos.copy()
+                    pg.mouse.set_visible(True)
+
             camera_rect.center = camera
             keys = pg.key.get_pressed()
 
@@ -381,8 +427,22 @@ def main():
             if seen:
                 os_window.blit(font.render("spotted!", False, (255, 255, 255)), (0, 0))
             os_window.blit(font.render("[E]: Edit Level", False, (255, 255, 255)), (0, 12))
-        pg.display.flip()
+        elif mode == Mode.EDIT:
+            os_window.fill((50, 50, 50))
 
+            keys = pg.key.get_pressed()
+            editor_camera.x += keys[pg.K_d] - keys[pg.K_a]
+            editor_camera.y += keys[pg.K_s] - keys[pg.K_w]
+
+            mouse_pos = pg.Vector2(pg.mouse.get_pos()) - pg.Vector2(os_window.get_size())/2 + editor_camera
+            hovered_grid_square = mouse_pos // 40
+
+            os_window.blit(font.render(str(hovered_grid_square), False, (255, 255, 255)), (0, 0))
+            os_window.blit(grid_square_overlay, (hovered_grid_square*40 - editor_camera + pg.Vector2(os_window.get_size())/2))
+
+            player.editor_draw(os_window, editor_camera)
+            
+        pg.display.flip()
         ms = clock.tick()
 
 
