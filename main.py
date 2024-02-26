@@ -134,6 +134,11 @@ class Wall:
         pass
 
 
+class Mode(Enum):
+    PLAY = 0
+    EDIT = 1
+
+
 class DoorMovement(Enum):
     STATIC = 0
     OPENING = -1
@@ -210,8 +215,8 @@ class Player:
         # if dir_.length() > 0:
         #     dir_.scale_to_length(self.speed * (delta * 30 / 1000))
 
-        self.dir.rotate_ip(keys[pg.K_d] * delta / 10)
-        self.dir.rotate_ip(-keys[pg.K_a] * delta / 10)
+        self.dir.rotate_ip(keys[pg.K_d] * delta / 20)
+        self.dir.rotate_ip(-keys[pg.K_a] * delta / 20)
 
         dir_ = self.dir * (keys[pg.K_w] - keys[pg.K_s]) * self.speed * (delta * 30 / 1000)
 
@@ -239,12 +244,6 @@ class Player:
         points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
-
-
-def angle_to_idx(angle):
-    if angle == 45:
-        return 22
-    return angle // 2
 
 
 class Guard:
@@ -297,6 +296,8 @@ def main():
     low_res_player_overlay = pg.Surface(pg.Vector2(window.get_size()) / 2)
     blurred_player_light_overlay = pg.Surface(window.get_size())
 
+    mode: Mode = Mode.PLAY
+
     clock = pg.time.Clock()
     pg.font.init()
     font = pg.font.SysFont("Arial", 12)
@@ -315,68 +316,71 @@ def main():
     pg.mouse.set_visible(False)
 
     while True:
-        camera_rect.center = camera
-        keys = pg.key.get_pressed()
-        for event in pg.event.get():
+        events = pg.event.get()
+        for event in events:
             if event.type == pg.QUIT or event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
                 pg.quit()
                 return
+        if mode == Mode.PLAY:
+            camera_rect.center = camera
+            keys = pg.key.get_pressed()
 
-        player.update(keys, walls, ms)
+            player.update(keys, walls, ms)
 
-        for i in buttons:
-            i.update(player, keys)
+            for i in buttons:
+                i.update(player, keys)
 
-        for wall in walls:
-            wall.update(buttons, ms)
+            for wall in walls:
+                wall.update(buttons, ms)
 
-        heading = player.pos - camera
-        camera += heading * 0.05
+            heading = player.pos - camera
+            camera += heading * 0.05
 
-        camera_angle_diff = (-player.dir.angle_to(pg.Vector2(0, -1))) - camera_angle
-        if abs(camera_angle_diff) > 300:
-            camera_angle_diff += 360
-        camera_angle += camera_angle_diff * 0.5
+            camera_angle_diff = (-player.dir.angle_to(pg.Vector2(0, -1))) - camera_angle
+            if abs(camera_angle_diff) > 300:
+                camera_angle_diff += 360
+            camera_angle += camera_angle_diff * 0.5
 
-        if camera_angle > 360:
-            camera_angle -= 360
+            if camera_angle > 360:
+                camera_angle -= 360
 
-        window.fill((75, 75, 75))
-        guard_light_overlay.fill((100, 100, 100))
-        player_light_overlay.fill(0)
+            window.fill((75, 75, 75))
+            guard_light_overlay.fill((100, 100, 100))
+            player_light_overlay.fill(0)
 
-        for wall in walls:
-            wall.draw(window, camera, camera_angle)
+            for wall in walls:
+                wall.draw(window, camera, camera_angle)
 
-        for i in buttons:
-            i.draw(window, camera, camera_angle)
+            for i in buttons:
+                i.draw(window, camera, camera_angle)
 
-        seen = False
-        for guard in guards:
-            seen = guard.update(player, walls, ms) or seen
-            guard.draw(window, guard_light_overlay, walls, camera, camera_angle)
+            seen = False
+            for guard in guards:
+                seen = guard.update(player, walls, ms) or seen
+                guard.draw(window, guard_light_overlay, walls, camera, camera_angle)
 
-        player.draw(window, camera, player_light_overlay, walls, camera_angle)
+            player.draw(window, camera, player_light_overlay, walls, camera_angle)
 
-        pg.transform.smoothscale_by(guard_light_overlay, 0.5, dest_surface=low_res_guard_overlay)
-        pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(),
-                                 dest_surface=blurred_guard_light_overlay)
+            pg.transform.smoothscale_by(guard_light_overlay, 0.5, dest_surface=low_res_guard_overlay)
+            pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(),
+                                     dest_surface=blurred_guard_light_overlay)
 
-        pg.transform.smoothscale_by(player_light_overlay, 0.5, dest_surface=low_res_player_overlay)
-        pg.transform.smoothscale(low_res_player_overlay, blurred_guard_light_overlay.get_size(),
-                                 dest_surface=blurred_player_light_overlay)
+            pg.transform.smoothscale_by(player_light_overlay, 0.5, dest_surface=low_res_player_overlay)
+            pg.transform.smoothscale(low_res_player_overlay, blurred_guard_light_overlay.get_size(),
+                                     dest_surface=blurred_player_light_overlay)
 
-        window.blit(blurred_guard_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
-        window.blit(blurred_player_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
+            window.blit(blurred_guard_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
+            window.blit(blurred_player_light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
 
-        os_window.fill((255, 0, 255))
+            os_window.fill((255, 0, 255))
 
-        rotated_window = pg.transform.rotate(window, camera_angle)
-        rotated_window_rect = pg.Rect((0, 0), pg.Vector2(os_window.get_size()) / 2)
-        rotated_window_rect.center = pg.Vector2(rotated_window.get_size()) / 2
-        pg.transform.scale_by(rotated_window.subsurface(rotated_window_rect), scale_factor, dest_surface=os_window)
-        if seen:
-            os_window.blit(font.render("spotted!", False, (255, 255, 255)), (0, 0))
+            rotated_window = pg.transform.rotate(window, camera_angle)
+            rotated_window_rect = pg.Rect((0, 0), pg.Vector2(os_window.get_size()) / 2)
+            rotated_window_rect.center = pg.Vector2(rotated_window.get_size()) / 2
+            pg.transform.scale_by(rotated_window.subsurface(rotated_window_rect), scale_factor, dest_surface=os_window)
+            if seen:
+                os_window.blit(font.render("spotted!", False, (255, 255, 255)), (0, 0))
+            os_window.blit(font.render("[E]: Edit Level", False, (255, 255, 255)), (0, 12))
         pg.display.flip()
 
         ms = clock.tick()
