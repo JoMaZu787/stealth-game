@@ -1,6 +1,5 @@
 from enum import Enum
 from typing import Literal
-from click import edit
 import pygame as pg
 from math import ceil, sqrt, cos, radians, copysign
 
@@ -15,9 +14,9 @@ class Ray:
     origin: pg.Vector2
     dir: pg.Vector2
 
-    def __init__(self, origin: pg.Vector2, dir: pg.Vector2) -> None:
+    def __init__(self, origin: pg.Vector2, dir_: pg.Vector2) -> None:
         self.origin = origin
-        self.dir = dir.normalize()
+        self.dir = dir_.normalize()
 
 
 def ray_circle(ray: Ray, center: pg.Vector2, radius: float) -> float | Literal[-1]:
@@ -276,9 +275,9 @@ class Player:
         transformed_pos = self.pos*2 - cam_pos
         pg.draw.polygon(
             window,
-            (255, 255, 100), tuple(transformed_pos + (i*2).rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
+            (255, 255, 100),
+            tuple(transformed_pos + (i*2).rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
-
 
 
 class Guard:
@@ -341,7 +340,7 @@ def main():
              Door(pg.Rect(355, 220, 10, 30), 0, False)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 235), 0)]
-    player = Player(pg.Vector2(0, 0), 3)
+    player = Player(pg.Vector2(10, 10), 3)
 
     camera: pg.Vector2 = player.pos.copy()
     camera_angle: float = 0.0
@@ -438,7 +437,10 @@ def main():
             hovered_grid_square = mouse_pos // 40
 
             os_window.blit(font.render(str(hovered_grid_square), False, (255, 255, 255)), (0, 0))
-            os_window.blit(grid_square_overlay, (hovered_grid_square*40 - editor_camera + pg.Vector2(os_window.get_size())/2))
+            os_window.blit(
+                grid_square_overlay,
+                (hovered_grid_square*40 - editor_camera + pg.Vector2(os_window.get_size())/2)
+            )
 
             player.editor_draw(os_window, editor_camera)
             
