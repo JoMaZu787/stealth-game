@@ -1,7 +1,30 @@
 from enum import Enum
-from typing import Literal
+from io import BytesIO
+from typing import Iterable, Literal
 import pygame as pg
 from math import ceil, sqrt, cos, radians, copysign
+import moderngl as mgl
+import struct
+
+
+def pack_iterable(iterable: Iterable, format: str):
+    result = BytesIO()
+    for i in iterable:
+        if not isinstance(i, tuple):
+            i = (i,)
+        result.write(struct.pack(format, *i))
+    result_value = result.getvalue()
+    result.close()
+    return result_value
+
+
+def unpack_list(data: bytes, format: str):
+    size = struct.calcsize(format)
+    split_data = [data[i:i+size] for i in range(0, len(data), size)]
+    result = []
+    for i in split_data:
+        result.append(struct.unpack(format, i))
+    return result
 
 
 def sign(x):
@@ -103,13 +126,17 @@ def scene_sdf(walls, pos):
     return t
 
 
-def ray_scene(ray: Ray, walls, max_distance: int = 1000):
+def ray_scene(ray: Ray, walls, guards, max_distance: int = 1000):
     dst = float("Inf")
     for wall in walls:
         t = ray_rect(ray, wall.rect, max_distance)
         if t == -1:
             continue
         dst = min(dst, t)
+    for guard in guards:
+        t = ray_circle(ray, guard.pos, 5)
+        if t == -1:
+            continue
     if dst == float("Inf"):
         dst = -1
     return min(dst, max_distance)
@@ -257,7 +284,7 @@ class Player:
             while i.collide_circle((self.pos, 5)):
                 self.pos.y -= sign(dir_.y)
 
-    def draw(self, window, cam_pos, overlay, walls, cam_angle):
+    def draw(self, window, cam_pos, overlay, walls: list[Wall], guards, cam_angle, raytrace: mgl.ComputeShader, ray_buffer: mgl.Buffer, result_buffer: mgl.Buffer, circle_buffer: mgl.Buffer, rect_buffer: mgl.Buffer):
         cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle)
         transformed_pos = self.pos - cam_pos
         pg.draw.polygon(
@@ -265,8 +292,42 @@ class Player:
             (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
         arc_a = self.dir.rotate(-45 / 2)
-        distances = [ray_scene(Ray(self.pos, arc_a.rotate(i)), walls, 250) for i in range(0, 45)]
-        points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(distances)]
+        rays = [Ray(self.pos, arc_a.rotate(i)) for i in range(0, 45)]
+        ray_tuples = [(ray.origin.x, ray.origin.y, ray.dir.x, ray.dir.y) for ray in rays]
+
+        ray_buffer_data = pack_iterable(ray_tuples, "@ffff")
+        ray_buffer.orphan(len(ray_buffer_data))
+        ray_buffer.write(ray_buffer_data)
+        
+        ray_buffer.bind_to_storage_buffer(0)
+        
+        result_buffer_data = pack_iterable((-1 for _ in rays), "@f")
+        result_buffer.orphan(len(result_buffer_data))
+        result_buffer.write(result_buffer_data)
+
+        result_buffer.bind_to_storage_buffer(1)
+
+        guard_circle_tuples = [(guard.pos.x, guard.pos.y, 5) for guard in guards]
+
+        circle_buffer_data = pack_iterable(guard_circle_tuples, "@fff")
+        circle_buffer.orphan(len(circle_buffer_data))
+        circle_buffer.write(circle_buffer_data)
+
+        circle_buffer.bind_to_storage_buffer(2)
+
+        rect_tuples = [(wall.rect.x, wall.rect.y, wall.rect.w, wall.rect.h) for wall in walls]
+
+        rect_buffer_data = pack_iterable(rect_tuples, "@ffff")
+        rect_buffer.orphan(len(rect_buffer_data))
+        rect_buffer.write(rect_buffer_data)
+
+        rect_buffer.bind_to_storage_buffer(3)
+
+        raytrace.run(ceil(len(rays)/64))
+
+        result_buffer_data = result_buffer.read()
+        distances = unpack_list(result_buffer_data, "@f")
+        points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j[0] for i, j in enumerate(distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
     
@@ -289,7 +350,7 @@ class Guard:
         self.timer = 0
         self.sees_player = False
 
-    def update(self, player, walls, delta):
+    def update(self, player, walls, guards, delta):
         self.timer += delta
         if self.timer >= self.rotate_frames:
             if self.rotate_frames != 0:
@@ -302,15 +363,15 @@ class Guard:
 
         self.sees_player = (
                 (self.dir * dif >= cos(radians(45 / 2))
-                 and 150 >= dist == ray_scene(Ray(self.pos, dif), walls, max_distance=dist))
+                 and 150 >= dist == ray_scene(Ray(self.pos, dif), walls, guards, max_distance=dist))
                 or dist <= 10
         )
         return self.sees_player
 
-    def draw(self, window, light_overlay, walls, cam_pos, cam_angle):
+    def draw(self, window, light_overlay, walls, guards, cam_pos, cam_angle):
         pos = self.pos - (cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle))
         arc_a = self.dir.rotate(-45 / 2)
-        distances = [ray_scene(Ray(self.pos, arc_a.rotate(i)), walls, max_distance=150) for i in range(0, 45, 2)]
+        distances = [ray_scene(Ray(self.pos, arc_a.rotate(i)), walls, guards, max_distance=150) for i in range(0, 45, 2)]
         points = [pos] + [pos + arc_a.rotate(j) * distances[i] for i, j in enumerate(range(0, 45, 2))]
         pg.draw.polygon(light_overlay, pg.Color(255, 255, 255), points)
         pg.draw.circle(window, (255, 100, 100), pos, 5)
@@ -351,6 +412,15 @@ def main():
     grid_square_overlay = pg.Surface((40, 40), pg.SRCALPHA)
     grid_square_overlay.fill((255, 255, 255, 100))
     pg.draw.rect(grid_square_overlay, (255, 255, 255, 255), grid_square_overlay.get_rect(), 2)
+
+    ctx = mgl.create_context(standalone=True)
+    with open("raytrace.comp") as f:
+        raytrace_compute_src = f.read()
+    raytrace = ctx.compute_shader(raytrace_compute_src)
+    ray_buffer = ctx.buffer(reserve=1, dynamic=True)
+    result_buffer = ctx.buffer(reserve=1, dynamic=True)
+    circle_buffer = ctx.buffer(reserve=1, dynamic=True)
+    rect_buffer = ctx.buffer(reserve=1, dynamic=True)
 
     pg.mouse.set_visible(False)
 
@@ -401,10 +471,10 @@ def main():
 
             seen = False
             for guard in guards:
-                seen = guard.update(player, walls, ms) or seen
-                guard.draw(window, guard_light_overlay, walls, camera, camera_angle)
+                seen = guard.update(player, walls, guards, ms) or seen
+                guard.draw(window, guard_light_overlay, walls, guards, camera, camera_angle)
 
-            player.draw(window, camera, player_light_overlay, walls, camera_angle)
+            player.draw(window, camera, player_light_overlay, walls, guards, camera_angle, raytrace, ray_buffer, result_buffer, circle_buffer, rect_buffer)
 
             pg.transform.smoothscale_by(guard_light_overlay, 0.5, dest_surface=low_res_guard_overlay)
             pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(),

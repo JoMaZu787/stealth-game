@@ -1,0 +1,117 @@
+#version 430 core
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Ray
+{
+    vec2 origin;
+    vec2 dir;
+};
+
+struct Line
+{
+    vec2 a;
+    vec2 b;
+};
+
+layout(std430, binding=0) buffer RayBuffer
+{
+    Ray ray_data[];
+};
+
+layout(std430, binding=1) buffer ResultBuffer
+{
+    float dists[];
+};
+
+struct Circle
+{
+    vec2 center;
+    float radius;
+};
+
+layout(std430, binding=2) buffer CircleBuffer
+{
+    Circle circle_data[];
+};
+
+struct Rect
+{
+    vec2 topleft;
+    vec2 size;
+};
+
+layout(std430, binding=3) buffer RectBuffer
+{
+    Rect rect_data[];
+};
+
+float cross(vec2 a, vec2 b)
+{
+    return a.x*b.y + a.y*b.x;
+}
+
+float ray_line(Ray ray, Line line, float max_dist){
+    if (line.b == line.a) return -1;
+    vec2 q = line.a;
+    vec2 s = line.b - q;
+    vec2 p = ray.origin;
+    vec2 r = normalize(ray.dir);
+    if (cross(s, r) == 0) return -1;
+    float u = cross(p - q, r / cross(s, r));
+    float t = cross(q - p, s / cross(r, s));
+    if ((0 > u || u > 1) || (t < 0 || max_dist < t)) t = -1;
+    return t;
+}
+
+float ray_rect(Ray ray, Rect rect, float max_dist)
+{
+    Line[4] lines = {
+        Line(rect.topleft, rect.topleft + vec2(rect.size.x, 0.0)),
+        Line(rect.topleft + vec2(rect.size.x, 0.0), rect.topleft + rect.size),
+        Line(rect.topleft + rect.size, rect.topleft + vec2(0.0, rect.size.y)),
+        Line(rect.topleft + vec2(0.0, rect.size.y), rect.topleft)
+    };
+    float dist = max_dist;
+    for (int i = 0; i < 4; i++)
+    {
+        float t = ray_line(ray, lines[i], max_dist);
+        if (t == -1)
+            continue;
+        dist = min(dist, t);
+    }
+    dist = min(dist, max_dist);
+    return dist;
+}
+
+float ray_circle(Ray ray, Circle circle, float max_dst){
+    vec2 origin = ray.origin - circle.center;
+    
+    float b = 2*dot(origin, ray.dir);
+    float c = dot(origin, origin) - circle.radius*circle.radius;
+
+    float discriminant = b*b - 4*c;
+    if (discriminant < 0) return max_dst;
+    else{
+        float t_pos = (-b+sqrt(discriminant))/2;
+        float t_neg = (-b-sqrt(discriminant))/2;
+        return min(min(t_pos, t_neg), max_dst);
+    }
+}
+
+
+
+
+void main() {
+    if (gl_GlobalInvocationID.x >= ray_data.length()) return;
+    float dst = 300;
+    for (int i = 0; i < circle_data.length(); i++)
+    {
+        dst = min(dst, ray_circle(ray_data[gl_GlobalInvocationID.x], circle_data[i], 300));
+    }
+    for (int i = 0; i < rect_data.length(); i++)
+    {
+        dst = min(dst, ray_rect(ray_data[gl_GlobalInvocationID.x], rect_data[i], 300));
+    }
+    dists[gl_GlobalInvocationID.x] = dst;
+}
