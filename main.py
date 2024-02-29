@@ -1,77 +1,15 @@
 from __future__ import annotations
-from enum import Enum
-from queue import Empty as QueueEmpty
-from typing import Iterable, Literal
-import pygame as pg
+
 from math import ceil, sqrt, cos, radians, copysign
-import multiprocessing
+from typing import Literal
+from enum import Enum
+import pygame as pg
 
 
 def sign(x):
     if x == 0:
         return 1
     return copysign(1, x)
-
-
-class RaycastProcessCommand(Enum):
-    CAST = 0
-    WORLD = 1
-
-
-class RaycastProcess:
-    proc: multiprocessing.Process
-    queue: multiprocessing.Queue
-    distances: list[float]
-
-    @staticmethod
-    def run(queue: multiprocessing.Queue):
-        queue.put(None)
-        guards: list[Guard] = []
-        walls: list[Wall] = []
-
-        try:
-            while True:
-                cmd, args = queue.get()
-                if cmd == RaycastProcessCommand.WORLD:
-                    walls, guards = args
-                    queue.put(None)
-                elif cmd == RaycastProcessCommand.CAST:
-                    dir: pg.Vector2
-                    pos: pg.Vector2
-                    dir, pos, max_distance, id = args
-                    arc_a = dir.rotate(-45/2)
-                    rays = [Ray(pos, arc_a.rotate(i)) for i in range(45)]
-                    distances = [ray_scene(i, walls, guards, max_distance) for i in rays]
-                    queue.put((distances, id))
-        except EOFError:
-            return
-
-    def __init__(self, walls, guards):
-        self.queue = multiprocessing.Queue(10)
-        self.waiting = False
-        self.proc = multiprocessing.Process(target=self.run, args=(self.queue,))
-        self.distances = [300] * 45
-        self.proc.start()
-        self.queue.get()
-        self.queue.put((
-            RaycastProcessCommand.WORLD,
-            (
-                walls,
-                guards
-            )
-        ))
-    
-    def get_distances(self, id):
-        if self.waiting:
-            try:
-                result = self.queue.get(block=False)
-                if result is not None:
-                    distances, id = result
-                    
-            except QueueEmpty:
-                pass
-        return self.distances
-
 
 
 class Ray:
@@ -221,6 +159,13 @@ class Wall:
         cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle)
         pg.draw.rect(window, (255, 255, 255), self.rect.move(-cam_pos.x, -cam_pos.y))
 
+    def editor_draw(self, window, camera):
+        rect = self.rect.copy()
+        rect.center = pg.Vector2(rect.center)*2
+        rect.scale_by_ip(2)
+        rect.move_ip(-camera+pg.Vector2(window.get_size()) / 2)
+        pg.draw.rect(window, (200, 200, 200), rect)
+
     def collide_circle(self, circle: tuple[pg.Vector2, float]):
         return rect_sdf(self.rect, circle[0]) < circle[1]
 
@@ -240,7 +185,13 @@ class DoorMovement(Enum):
 
 
 class Door(Wall):
-    def __init__(self, rect: pg.Rect, id_, horizontal: bool,
+    shape: list[pg.Vector2] = [
+        pg.Vector2(5, 20),
+        pg.Vector2(10, 15),
+        pg.Vector2(15, 20)
+    ]
+
+    def __init__(self, rect: pg.Rect, id_, horizontal: bool, flipped: bool,
                  color: pg.Color | tuple[int, int, int] = pg.Color(200, 200, 200)):
         super().__init__(rect)
         self.pos = pg.Vector2(rect.x, rect.y)
@@ -249,6 +200,7 @@ class Door(Wall):
         self.door_position = 1.0
         self.ID = id_
         self.horizontal = horizontal
+        self.flipped = flipped
         self.movement = DoorMovement.STATIC
 
     def update(self, buttons: list[Button], delta: int):
@@ -265,8 +217,14 @@ class Door(Wall):
 
         if self.horizontal:
             self.rect.width = self.size[0] * self.door_position
+            if self.flipped:
+                self.rect.x = self.pos.x + self.size[0] * (1-self.door_position)
+                self.rect.width += 2
         else:
             self.rect.height = self.size[1] * self.door_position
+            if self.flipped:
+                self.rect.y = self.pos.y + self.size[1] * (1-self.door_position)
+                self.rect.height += 2
 
         t: list[Button] = []
         for i in buttons:
@@ -281,6 +239,18 @@ class Door(Wall):
             return
         if self.movement != DoorMovement.CLOSING and self.door_position != 1:
             self.movement = DoorMovement.CLOSING
+    
+    def editor_draw(self, window, camera):
+        super().editor_draw(window, camera)
+        angle = 180
+        if self.horizontal:
+            angle += 90
+        if self.flipped:
+            angle -= 180
+        pg.draw.polygon(window, (100, 255, 100), tuple(i.rotate(angle)+self.pos-camera for i in self.shape))
+
+
+
 
 
 class Player:
@@ -327,7 +297,7 @@ class Player:
             while i.collide_circle((self.pos, 5)):
                 self.pos.y -= sign(dir_.y)
 
-    def draw(self, window, cam_pos, overlay, walls: list[Wall], cam_angle, raycaster: RaycastProcess):
+    def draw(self, window, cam_pos, overlay, walls: list[Wall], guards: list[Guard], cam_angle):
         cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2 - pg.Vector2(0, 100).rotate(cam_angle)
         transformed_pos = self.pos - cam_pos
         pg.draw.polygon(
@@ -335,10 +305,11 @@ class Player:
             (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
         arc_a = self.dir.rotate(-45 / 2)
+        rays = [Ray(self.pos, arc_a.rotate(i)) for i in range(45)]
         if self.xray:
             distances = [300 for _ in range(45)]
         else:
-            distances = raycaster.get_distances()
+            distances = [ray_scene(ray, walls, guards, 300) for ray in rays]
         points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
@@ -393,16 +364,43 @@ class Guard:
         pg.draw.circle(light_overlay, (255, 255, 255), pos, 10)
 
 
-class World:
+class Level:
     player: Player
     guards: list[Guard]
     walls: list[Wall]
     buttons: list[Button]
-    def __init__(self, player_pos, player_speed):
+    camera: pg.Vector2
+    camera_angle: float
+    camera_rect:pg.Rect
+    def __init__(self, player_pos, player_speed,window_size: pg.Vector2 | tuple[int, int]):
         self.player = Player(player_pos, player_speed, False)
+        self.camera = self.player.pos.copy()
+        self.camera_angle = 0.0
+        self.camera_rect= pg.Rect((0, 0), window_size)
 
-    def update(self, ms):
-        pass
+    def update(self, keys, delta):
+        self.player.update(keys, self.walls, delta)
+        self.camera_rect.center = self.camera.copy()
+
+        heading = self.player.pos - self.camera
+        self.camera += heading * 0.05
+
+        for i in self.buttons:
+            i.update(self.player, keys)
+
+        for wall in self.walls:
+            wall.update(self.buttons, delta)
+
+        camera_angle_diff = (-self.player.dir.angle_to(pg.Vector2(0, -1))) - self.camera_angle
+        if abs(camera_angle_diff) > 300:
+            camera_angle_diff += 360
+        self.camera_angle += camera_angle_diff * 0.5
+
+        if self.camera_angle > 360:
+            self.camera_angle -= 360
+
+        for guard in self.guards:
+            self.seen = guard.update(self.player, self.walls, self.guards, delta) or self.seen
 
 
 def main():
@@ -424,8 +422,8 @@ def main():
     pg.font.init()
     font = pg.font.SysFont("Arial", 12)
 
-    walls = [Wall(pg.Rect(150, 200, 400, 20)), Wall(pg.Rect(350, 250, 20, 100)),
-             Door(pg.Rect(355, 220, 10, 30), 0, False)]
+    walls = [Wall(pg.Rect(140, 200, 400, 20)), Wall(pg.Rect(340, 240, 20, 100)), Wall(pg.Rect(-20, -20, 20, 20)),
+             Door(pg.Rect(345, 220, 10, 20), 0, False, True)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 235), 0)]
     player = Player(pg.Vector2(10, 10), 3, False)
@@ -439,10 +437,6 @@ def main():
     grid_square_overlay = pg.Surface((40, 40), pg.SRCALPHA)
     grid_square_overlay.fill((255, 255, 255, 100))
     pg.draw.rect(grid_square_overlay, (255, 255, 255, 255), grid_square_overlay.get_rect(), 2)
-
-    pg.mouse.set_visible(False)
-
-    raycaster = RaycastProcess(walls, guards)
 
     while True:
         events = pg.event.get()
@@ -496,7 +490,7 @@ def main():
                 if camera_rect.colliderect(guard.bounds):
                     guard.draw(window, guard_light_overlay, walls, guards, camera, camera_angle)
 
-            player.draw(window, camera, player_light_overlay, walls, camera_angle, raycaster)
+            player.draw(window, camera, player_light_overlay, walls, guards, camera_angle)
             pg.transform.smoothscale_by(guard_light_overlay, 0.5, dest_surface=low_res_guard_overlay)
             pg.transform.smoothscale(low_res_guard_overlay, blurred_guard_light_overlay.get_size(),
                                      dest_surface=blurred_guard_light_overlay)
@@ -519,8 +513,15 @@ def main():
             os_window.blit(font.render("[M]: Edit Level", False, (255, 255, 255)), (0, 12))
         elif mode == Mode.EDIT:
             for event in events:
-                if event.type == pg.KEYDOWN and event.key == pg.K_m:
-                    mode = Mode.PLAY
+                if event.type == pg.KEYDOWN:
+                    if event.key == pg.K_m:
+                        mode = Mode.PLAY
+                        pg.mouse.set_visible(False)
+                    elif 47 < event.key < 58:
+                        pressed_number = event.key - 48
+                        for button in buttons:
+                            if button.id == pressed_number:
+                                button.status = not button.status
             os_window.fill((50, 50, 50))
 
             keys = pg.key.get_pressed()
@@ -531,12 +532,17 @@ def main():
             hovered_grid_square = mouse_pos // 40
 
             os_window.blit(font.render(str(hovered_grid_square), False, (255, 255, 255)), (0, 0))
+
+            for wall in walls:
+                wall.update(buttons, ms)
+                wall.editor_draw(os_window, editor_camera)
+
+            player.editor_draw(os_window, editor_camera)
+
             os_window.blit(
                 grid_square_overlay,
                 (hovered_grid_square*40 - editor_camera + pg.Vector2(os_window.get_size())/2)
             )
-
-            player.editor_draw(os_window, editor_camera)
             
         pg.display.flip()
         ms = clock.tick()
