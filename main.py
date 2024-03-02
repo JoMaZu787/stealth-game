@@ -76,7 +76,7 @@ def ray_line(ray: Ray, line: tuple[pg.Vector2, pg.Vector2],
 
 
 def ray_rect(ray: Ray, rect: pg.Rect, max_dist: float = float("Inf")):
-    temp = pg.Vector2(rect.center).distance_squared_to(pg.Vector2(rect.top_left))
+    temp = pg.Vector2(rect.center).distance_squared_to(pg.Vector2(rect.topleft))
     dot = (pg.Vector2(rect.center)-ray.origin).dot(ray.dir)
     if dot <= -temp:
         return -1
