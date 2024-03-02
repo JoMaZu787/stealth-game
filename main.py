@@ -5,19 +5,18 @@ from typing import Literal
 from enum import Enum
 import pygame as pg
 
-
 COLORS = (
-            pg.Color("#FFFF00"),
-            pg.Color("#0000FF"),
-            pg.Color("#A020F0"),
-            pg.Color("#FFA500"),
-            pg.Color("#FF69B4"),
-            pg.Color("#00FFFF"),
-            pg.Color("#FF00FF"),
-            pg.Color("#FF4533"),
-            pg.Color("#33FF57"),
-            pg.Color("#9370DB")
-         )
+    pg.Color("#FFFF00"),
+    pg.Color("#0000FF"),
+    pg.Color("#A020F0"),
+    pg.Color("#FFA500"),
+    pg.Color("#FF69B4"),
+    pg.Color("#00FFFF"),
+    pg.Color("#FF00FF"),
+    pg.Color("#FF4533"),
+    pg.Color("#33FF57"),
+    pg.Color("#9370DB")
+)
 
 
 def sign(x):
@@ -37,16 +36,16 @@ class Ray:
 
 def ray_circle(ray: Ray, center: pg.Vector2, radius: float) -> float | Literal[-1]:
     origin = ray.origin - center
-    
-    b: float = 2*origin.dot(ray.dir)
-    c: float = origin.length_squared() - radius**2
 
-    discriminant: float = b**2 - 4*c
+    b: float = 2 * origin.dot(ray.dir)
+    c: float = origin.length_squared() - radius ** 2
+
+    discriminant: float = b ** 2 - 4 * c
     if discriminant < 0:
         return -1
     else:
-        t_pos = (-b+sqrt(discriminant))/2
-        t_neg = (-b-sqrt(discriminant))/2
+        t_pos = (-b + sqrt(discriminant)) / 2
+        t_neg = (-b - sqrt(discriminant)) / 2
         return min(t_pos, t_neg)
 
 
@@ -55,7 +54,8 @@ def ray_line(ray: Ray, line: tuple[pg.Vector2, pg.Vector2],
     if (line[0] - ray.origin).dot(ray.dir) < 0 > (line[1] - ray.origin).dot(ray.dir):
         return -1
     temp = ray.dir.rotate(90)
-    if sign((line[0] - ray.origin).dot(temp)) == sign((line[1] - ray.origin).dot(temp)) and (line[0] - ray.origin).dot(temp) != 0 and (line[1] - ray.origin).dot(temp) != 0:
+    if sign((line[0] - ray.origin).dot(temp)) == sign((line[1] - ray.origin).dot(temp)) and (line[0] - ray.origin).dot(
+            temp) != 0 and (line[1] - ray.origin).dot(temp) != 0:
         pass
     if line[0] == line[1]:
         return -1
@@ -77,7 +77,7 @@ def ray_line(ray: Ray, line: tuple[pg.Vector2, pg.Vector2],
 
 def ray_rect(ray: Ray, rect: pg.Rect, max_dist: float = float("Inf")):
     temp = pg.Vector2(rect.center).distance_squared_to(pg.Vector2(rect.topleft))
-    dot = (pg.Vector2(rect.center)-ray.origin).dot(ray.dir)
+    dot = (pg.Vector2(rect.center) - ray.origin).dot(ray.dir)
     if dot <= -temp:
         return -1
     lines = [(pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright)),
@@ -179,19 +179,22 @@ class Button:
         pg.draw.rect(window, self.color, self.inner_inner_rect, border_radius=2)
 
     def editor_draw(self, window: pg.Surface, camera: pg.Vector2):
-        pos = self.pos*2 - camera + pg.Vector2(window.get_size()) / 2
+        pos = self.pos * 2 - camera + pg.Vector2(window.get_size()) / 2
         self.rect.center = pos
         self.colored_rect.center = pos
         self.inner_rect.center = pos
         self.inner_inner_rect.center = pos
         pg.draw.rect(window, (200, 200, 200), self.rect.scale_by(2), border_radius=10)
-        pg.draw.rect(window, (100, 255, 100) if self.status else (255, 100, 100), self.colored_rect.scale_by(2), border_radius=6)
-        pg.draw.rect(window, (100, 100, 100) if self.used else (200, 200, 200), self.inner_rect.scale_by(2), border_radius=4)
+        pg.draw.rect(window, (100, 255, 100) if self.status else (255, 100, 100), self.colored_rect.scale_by(2),
+                     border_radius=6)
+        pg.draw.rect(window, (100, 100, 100) if self.used else (200, 200, 200), self.inner_rect.scale_by(2),
+                     border_radius=4)
         pg.draw.rect(window, self.color, self.inner_inner_rect.scale_by(2), border_radius=4)
 
 
 class Wall:
     rect: pg.Rect
+
     def __init__(self, rect):
         self.rect = rect
 
@@ -201,9 +204,9 @@ class Wall:
 
     def editor_rect(self, window, camera):
         rect = self.rect.copy()
-        rect.center = pg.Vector2(rect.center)*2
+        rect.center = pg.Vector2(rect.center) * 2
         rect.scale_by_ip(2)
-        rect.move_ip(-camera+pg.Vector2(window.get_size()) / 2)
+        rect.move_ip(-camera + pg.Vector2(window.get_size()) / 2)
         return rect
 
     def editor_draw(self, window, camera):
@@ -255,12 +258,12 @@ class Door(Wall):
         if self.horizontal:
             self.rect.width = self.size[0] * self.door_position
             if self.flipped:
-                self.rect.x = self.pos.x + self.size[0] * (1-self.door_position)
+                self.rect.x = self.pos.x + self.size[0] * (1 - self.door_position)
                 self.rect.width += 2
         else:
             self.rect.height = self.size[1] * self.door_position
             if self.flipped:
-                self.rect.y = self.pos.y + self.size[1] * (1-self.door_position)
+                self.rect.y = self.pos.y + self.size[1] * (1 - self.door_position)
                 self.rect.height += 2
 
         t: list[Button] = []
@@ -277,15 +280,23 @@ class Door(Wall):
             return
         if self.movement != DoorMovement.CLOSING and self.door_position != 1:
             self.movement = DoorMovement.CLOSING
-    
+
     def editor_draw(self, window, camera):
+        if self.door_position != -1:
+            temp = pg.Rect(self.pos, pg.Vector2(self.size)*2)
+            temp.center = pg.Vector2(temp.center)*2
+            temp.move_ip(-camera + pg.Vector2(window.get_size()) / 2 - pg.Vector2(self.size))
+            temp.move_ip(pg.Vector2(temp.width*(not self.horizontal), temp.height * self.horizontal)/4)
+            temp.size = (temp.width-(temp.width*(not self.horizontal))/2, temp.height-(temp.height*self.horizontal)/2)
+            pg.draw.rect(window, (0, 0, 0), temp)
         super().editor_draw(window, camera)
         rect = self.editor_rect(window, camera)
-        points = [
-            pg.Vector2(rect.right if self.flipped else rect.left, rect.top if self.flipped else rect.bottom),
-            pg.Vector2(rect.left if (self.flipped != self.horizontal) else rect.right, rect.top if (self.flipped != self.horizontal) else rect.bottom)
-        ]
-        points.append(points[0].lerp(points[1], 0.5) + pg.Vector2(-1 if self.horizontal else 0, 0 if self.horizontal else -1) * (-1 if self.flipped else 1) * 5)
+        points = [pg.Vector2(rect.right if self.flipped else rect.left, rect.top if self.flipped else rect.bottom),
+                  pg.Vector2(rect.left if (self.flipped != self.horizontal) else rect.right,
+                  rect.top if (self.flipped != self.horizontal) else rect.bottom)]
+        points.append(
+            points[0].lerp(points[1], 0.5) + pg.Vector2(-1 if self.horizontal else 0, 0 if self.horizontal else -1) * (
+                -1 if self.flipped else 1) * 5)
         pg.draw.polygon(window, COLORS[self.ID], tuple(points))
 
 
@@ -355,14 +366,14 @@ class Player:
         points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(self.distances)]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
-    
+
     def editor_draw(self, window, cam_pos):
         cam_pos = cam_pos - pg.Vector2(window.get_size()) / 2
-        transformed_pos = self.pos*2 - cam_pos
+        transformed_pos = self.pos * 2 - cam_pos
         pg.draw.polygon(
             window,
             (255, 255, 100),
-            tuple(transformed_pos + (i*2).rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
+            tuple(transformed_pos + (i * 2).rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
 
 
@@ -408,22 +419,22 @@ class Guard:
         pg.draw.polygon(light_overlay, pg.Color(255, 255, 255), points)
         pg.draw.circle(window, (255, 100, 100), pos, 5)
         pg.draw.circle(light_overlay, (255, 255, 255), pos, 10)
-    
+
     def editor_draw(self, window, overlay, camera, walls, guards):
-        pos = self.pos*2-camera+pg.Vector2(window.get_size())/2
+        pos = self.pos * 2 - camera + pg.Vector2(window.get_size()) / 2
         pg.draw.circle(window, (255, 100, 100), pos, 10)
-        arc_a = self.dir.rotate(-45/2)
+        arc_a = self.dir.rotate(-45 / 2)
         if self.rotate_frames == 0:
             if self.distances is None:
                 rays = [Ray(self.pos, arc_a.rotate(i)) for i in range(0, 45, 2)]
                 self.distances = [ray_scene(ray, walls, guards, 150) for ray in rays]
-            points = [pos] + [pos + arc_a.rotate(j) * self.distances[i]*2 for i, j in enumerate(range(0, 45, 2))]
+            points = [pos] + [pos + arc_a.rotate(j) * self.distances[i] * 2 for i, j in enumerate(range(0, 45, 2))]
             pg.draw.polygon(overlay, (255, 255, 255, 100), points)
         else:
             if self.editor_distances is None:
                 rays = [Ray(self.pos, self.dir.rotate(i)) for i in range(0, 359)]
                 self.editor_distances = [ray_scene(ray, walls, guards, 150) for ray in rays]
-            points = [pos + self.dir.rotate(j) * self.editor_distances[i]*2 for i, j in enumerate(range(0, 359))]
+            points = [pos + self.dir.rotate(j) * self.editor_distances[i] * 2 for i, j in enumerate(range(0, 359))]
             pg.draw.polygon(overlay, (255, 255, 255, 100), points)
         pg.draw.circle(overlay, (255, 255, 255, 100), pos, 20)
 
@@ -435,13 +446,14 @@ class Level:
     buttons: list[Button]
     camera: pg.Vector2
     camera_angle: float
-    camera_rect:pg.Rect
+    camera_rect: pg.Rect
     editor_override: list[bool]
-    def __init__(self, player_pos, player_speed,window_size: pg.Vector2 | tuple[int, int]):
+
+    def __init__(self, player_pos, player_speed, window_size: pg.Vector2 | tuple[int, int]):
         self.player = Player(player_pos, player_speed, False)
         self.camera = self.player.pos.copy()
         self.camera_angle = 0.0
-        self.camera_rect= pg.Rect((0, 0), window_size)
+        self.camera_rect = pg.Rect((0, 0), window_size)
         self.editor_override = [False for _ in range(10)]
 
     def update(self, keys, delta):
@@ -488,8 +500,10 @@ def main():
     pg.font.init()
     font = pg.font.SysFont("Arial", 12)
 
-    walls: list[Wall] = [Wall(pg.Rect(140, 200, 400, 20)), Wall(pg.Rect(340, 240, 20, 100)), Wall(pg.Rect(440, 240, 20, 100)), Wall(pg.Rect(340, 320, 100, 20)),
-             Door(pg.Rect(345, 220, 10, 20), 0, False, True), Door(pg.Rect(445, 220, 10, 20), 1, False, True)]
+    walls: list[Wall] = [Wall(pg.Rect(140, 200, 400, 20)), Wall(pg.Rect(340, 240, 20, 100)),
+                         Wall(pg.Rect(440, 240, 20, 100)), Wall(pg.Rect(340, 320, 100, 20)),
+                         Door(pg.Rect(345, 220, 10, 20), 0, False, True),
+                         Door(pg.Rect(445, 220, 10, 20), 1, False, True)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 230), 1), Button(pg.Vector2(370, 310), 0)]
     player = Player(pg.Vector2(10, 10), 3, False)
@@ -503,7 +517,7 @@ def main():
     grid_square_overlay = pg.Surface((40, 40), pg.SRCALPHA)
     grid_square_overlay.fill((255, 255, 255, 100))
     pg.draw.rect(grid_square_overlay, (255, 255, 255, 255), grid_square_overlay.get_rect(), 2)
-    
+
     editor_override: list[bool] = [False for _ in range(10)]
     editor_guard_overlay: pg.Surface = pg.Surface(os_window.get_size(), flags=pg.SRCALPHA)
 
@@ -600,10 +614,10 @@ def main():
             editor_guard_overlay.fill((0, 0, 0, 0))
 
             keys = pg.key.get_pressed()
-            editor_camera.x += keys[pg.K_d] - keys[pg.K_a]
-            editor_camera.y += keys[pg.K_s] - keys[pg.K_w]
+            editor_camera.x += keys[pg.K_d] * ms - keys[pg.K_a] * ms
+            editor_camera.y += keys[pg.K_s] * ms - keys[pg.K_w] * ms
 
-            mouse_pos = pg.Vector2(pg.mouse.get_pos()) - pg.Vector2(os_window.get_size())/2 + editor_camera
+            mouse_pos = pg.Vector2(pg.mouse.get_pos()) - pg.Vector2(os_window.get_size()) / 2 + editor_camera
             hovered_grid_square = mouse_pos // 40
 
             os_window.blit(font.render(str(hovered_grid_square), False, (255, 255, 255)), (0, 0))
@@ -622,7 +636,7 @@ def main():
 
             os_window.blit(
                 grid_square_overlay,
-                (hovered_grid_square*40 - editor_camera + pg.Vector2(os_window.get_size())/2)
+                (hovered_grid_square * 40 - editor_camera + pg.Vector2(os_window.get_size()) / 2)
             )
 
             for i, j in enumerate(editor_override):
@@ -635,9 +649,9 @@ def main():
                     16,
                     16
                 ), 2)
-            
+
             os_window.blit(editor_guard_overlay, (0, 0))
-            
+
         pg.display.flip()
         ms = clock.tick()
 
