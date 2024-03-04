@@ -78,7 +78,7 @@ def ray_line(ray: Ray, line: tuple[pg.Vector2, pg.Vector2],
 def ray_rect(ray: Ray, rect: pg.Rect, max_dist: float = float("Inf")):
     temp = pg.Vector2(rect.center).distance_squared_to(pg.Vector2(rect.topleft))
     dot = (pg.Vector2(rect.center) - ray.origin).dot(ray.dir)
-    if dot <= -temp:
+    if copysign(dot**2, dot) < -temp:
         return -1
     lines = [(pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright)),
              (pg.Vector2(rect.topleft), pg.Vector2(rect.topright)),
@@ -128,8 +128,8 @@ def scene_sdf(walls, pos):
     return t
 
 
-def ray_scene(ray: Ray, walls, guards, max_distance: int = 1000):
-    dst = float("Inf")
+def ray_scene(ray: Ray, walls, guards, max_distance: float = float("Inf")):
+    dst = max_distance
     for wall in walls:
         t = ray_rect(ray, wall.rect, max_distance)
         if t == -1:
@@ -139,8 +139,8 @@ def ray_scene(ray: Ray, walls, guards, max_distance: int = 1000):
         t = ray_circle(ray, guard.pos, 5)
         if t == -1:
             continue
-    if dst == float("Inf"):
-        dst = -1
+    if dst >= max_distance:
+        dst = max_distance
     return min(dst, max_distance)
 
 
