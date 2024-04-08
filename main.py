@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import ceil, sqrt, cos, radians, copysign
+from re import L
 from typing import Literal
 from enum import Enum
 import pygame as pg
@@ -17,6 +18,36 @@ COLORS = (
     pg.Color("#33FF57"),
     pg.Color("#9370DB")
 )
+
+
+def get_distances(pos: pg.Vector2, dir_: pg.Vector2, fov: int, walls: list[Wall], max_dist: float = 300):
+    lines: list[tuple[pg.Vector2, pg.Vector2]] = []
+    squared_distances = [max_dist**2 for _ in range(fov)]
+
+    for wall in walls:
+        lines.extend((
+            (pg.Vector2(wall.rect.topleft) - pos, pg.Vector2(wall.rect.topright) - pos),
+            (pg.Vector2(wall.rect.topright) - pos, pg.Vector2(wall.rect.bottomright) - pos),
+            (pg.Vector2(wall.rect.bottomright) - pos, pg.Vector2(wall.rect.bottomleft) - pos),
+            (pg.Vector2(wall.rect.bottomleft) - pos, pg.Vector2(wall.rect.topleft) - pos)
+        ))
+
+    arc_a = dir_.rotate(-fov/2)
+
+    for line in lines:
+        a, b = line
+        angle_a = a.angle_to(dir_)
+        angle_b = b.angle_to(dir_)
+        if abs(angle_a) > fov/2 and abs(angle_b) > fov/2 and sign(angle_a) == sign(angle_b) or abs(angle_a) > 90 and abs(angle_b) > 90:
+            continue
+
+        for i in range(int(min(angle_a, angle_b)), int(max(angle_a, angle_b))):
+            d = dir_.rotate(i)
+    
+    return map(sqrt, squared_distances)
+
+def get_squared_distance_line(a: pg.Vector2, b: pg.Vector2, t: float):
+    return a.lerp(b, pg.math.clamp(t, 0, 1)).length_squared()
 
 
 def sign(x):
@@ -180,10 +211,10 @@ class Button:
 
     def editor_draw(self, window: pg.Surface, camera: pg.Vector2):
         pos = self.pos * 2 - camera + pg.Vector2(window.get_size()) / 2
-        self.rect.center = pos
-        self.colored_rect.center = pos
-        self.inner_rect.center = pos
-        self.inner_inner_rect.center = pos
+        self.rect.center = int(pos.x), int(pos.y)
+        self.colored_rect.center = int(pos.x), int(pos.y)
+        self.inner_rect.center = int(pos.x), int(pos.y)
+        self.inner_inner_rect.center = int(pos.x), int(pos.y)
         pg.draw.rect(window, (200, 200, 200), self.rect.scale_by(2), border_radius=10)
         pg.draw.rect(window, (100, 255, 100) if self.status else (255, 100, 100), self.colored_rect.scale_by(2),
                      border_radius=6)
@@ -204,7 +235,7 @@ class Wall:
 
     def editor_rect(self, window, camera):
         rect = self.rect.copy()
-        rect.center = pg.Vector2(rect.center) * 2
+        rect.center = rect.centerx*2, rect.centery*2
         rect.scale_by_ip(2)
         rect.move_ip(-camera + pg.Vector2(window.get_size()) / 2)
         return rect
@@ -256,14 +287,14 @@ class Door(Wall):
                 self.movement = DoorMovement.STATIC
 
         if self.horizontal:
-            self.rect.width = self.size[0] * self.door_position
+            self.rect.width = int(self.size[0] * self.door_position)
             if self.flipped:
-                self.rect.x = self.pos.x + self.size[0] * (1 - self.door_position)
+                self.rect.x = int(self.pos.x + self.size[0] * (1 - self.door_position))
                 self.rect.width += 2
         else:
-            self.rect.height = self.size[1] * self.door_position
+            self.rect.height = int(self.size[1] * self.door_position)
             if self.flipped:
-                self.rect.y = self.pos.y + self.size[1] * (1 - self.door_position)
+                self.rect.y = int(self.pos.y + self.size[1] * (1 - self.door_position))
                 self.rect.height += 2
 
         t: list[Button] = []
@@ -284,10 +315,10 @@ class Door(Wall):
     def editor_draw(self, window, camera):
         if self.door_position != -1:
             temp = pg.Rect(self.pos, pg.Vector2(self.size)*2)
-            temp.center = pg.Vector2(temp.center)*2
+            temp.center = temp.centerx*2, temp.centery*2
             temp.move_ip(-camera + pg.Vector2(window.get_size()) / 2 - pg.Vector2(self.size))
             temp.move_ip(pg.Vector2(temp.width*(not self.horizontal), temp.height * self.horizontal)/4)
-            temp.size = (temp.width-(temp.width*(not self.horizontal))/2, temp.height-(temp.height*self.horizontal)/2)
+            temp.size = (int(temp.width-(temp.width*(not self.horizontal))/2), int(temp.height-(temp.height*self.horizontal)/2))
             pg.draw.rect(window, (0, 0, 0), temp)
         super().editor_draw(window, camera)
         rect = self.editor_rect(window, camera)
@@ -308,11 +339,10 @@ class Player:
         pg.Vector2(4, 4)
     ]
 
-    def __init__(self, pos, speed, xray):
+    def __init__(self, pos, speed):
         self.pos = pos
         self.speed = speed
         self.dir = pg.Vector2(0, -1)
-        self.xray = xray
         self.moved = False
         self.distances = None
 
@@ -358,12 +388,7 @@ class Player:
             (100, 255, 100), tuple(transformed_pos + i.rotate(pg.Vector2(0, -1).angle_to(self.dir)) for i in self.shape)
         )
         arc_a = self.dir.rotate(-45 / 2)
-        rays = [Ray(self.pos, arc_a.rotate(i)) for i in range(45)]
-        if self.xray:
-            self.distances = [300 for _ in range(45)]
-        elif self.moved or door_changed or self.distances is None:
-            self.distances = [ray_scene(ray, walls, guards, 300) for ray in rays]
-        points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(self.distances)]
+        points = [transformed_pos] + [transformed_pos + arc_a.rotate(i) * j for i, j in enumerate(get_distances(self.pos, self.dir, 45, walls))]
         pg.draw.polygon(overlay, (100, 255, 100), points)
         pg.draw.circle(overlay, (100, 255, 100), transformed_pos, 10)
 
@@ -450,7 +475,7 @@ class Level:
     editor_override: list[bool]
 
     def __init__(self, player_pos, player_speed, window_size: pg.Vector2 | tuple[int, int]):
-        self.player = Player(player_pos, player_speed, False)
+        self.player = Player(player_pos, player_speed)
         self.camera = self.player.pos.copy()
         self.camera_angle = 0.0
         self.camera_rect = pg.Rect((0, 0), window_size)
@@ -458,7 +483,7 @@ class Level:
 
     def update(self, keys, delta):
         self.player.update(keys, self.walls, delta)
-        self.camera_rect.center = self.camera.copy()
+        self.camera_rect.center = int(self.camera.x), int(self.camera.y)
 
         heading = self.player.pos - self.camera
         self.camera += heading * 0.05
@@ -506,7 +531,7 @@ def main():
                          Door(pg.Rect(445, 220, 10, 20), 1, False, True)]
     guards = [Guard(pg.Vector2(300, 300), pg.Vector2(0, -1), 8), Guard(pg.Vector2(550, 180), pg.Vector2(0, 1), 0)]
     buttons = [Button(pg.Vector2(150, 230), 1), Button(pg.Vector2(370, 310), 0)]
-    player = Player(pg.Vector2(10, 10), 3, False)
+    player = Player(pg.Vector2(10, 10), 3)
 
     camera: pg.Vector2 = player.pos.copy()
     camera_angle: float = 0.0
@@ -534,7 +559,7 @@ def main():
                     editor_camera = player.pos.copy()
                     pg.mouse.set_visible(True)
 
-            camera_rect.center = camera
+            camera_rect.center = int(camera.x), int(camera.y)
             keys = pg.key.get_pressed()
 
             player.update(keys, walls, ms)
@@ -593,7 +618,7 @@ def main():
 
             rotated_window = pg.transform.rotate(window, camera_angle)
             rotated_window_rect = pg.Rect((0, 0), pg.Vector2(os_window.get_size()) / 2)
-            rotated_window_rect.center = pg.Vector2(rotated_window.get_size()) / 2
+            rotated_window_rect.center = int(rotated_window.get_width() / 2), int(rotated_window.get_height() / 2)
             pg.transform.scale_by(rotated_window.subsurface(rotated_window_rect), scale_factor, dest_surface=os_window)
             if seen:
                 os_window.blit(font.render("spotted!", False, (255, 255, 255)), (0, 0))
