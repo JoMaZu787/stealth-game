@@ -12,10 +12,10 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python Debugger: test.py",
+            "name": "Python Debugger: editor_test.py",
             "type": "debugpy",
             "request": "launch",
-            "program": "test.py",
+            "program": "editor_test.py",
             "console": "integratedTerminal"
         }
     ]

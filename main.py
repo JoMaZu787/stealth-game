@@ -1,6 +1,10 @@
+from __future__ import annotations
 from dataclasses import dataclass
+from functools import reduce
 from itertools import pairwise
 from math import copysign
+import operator
+from typing import Any
 import pygame as pg
 from sys import exit
 from collections import deque
@@ -9,42 +13,22 @@ pg.font.init()
 font = pg.font.SysFont("Arial", 24)
 
 
-@dataclass
-class Polygon:
-    points: list[pg.Vector2]
+def rect_lines(rect: pg.Rect, /):
+    return [
+        (pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright)),
+        (pg.Vector2(rect.bottomright), pg.Vector2(rect.topright)),
+        (pg.Vector2(rect.topright), pg.Vector2(rect.topleft)),
+        (pg.Vector2(rect.topleft), pg.Vector2(rect.bottomleft))
+    ]
 
-    @property
-    def convex(self):
-        def cross_product(p1, p2, p3):
-            return (p2.x - p1.x) * (p3.y - p2.y) - (p2.y - p1.y) * (p3.x - p2.x)
 
-        n = len(self.points)
-        if n < 3:
-            return False
-        
-        sign = None
-        for i in range(n):
-            p1, p2, p3 = self.points[i], self.points[(i + 1) % n], self.points[(i + 2) % n]
-            cp = cross_product(p1, p2, p3)
-            if cp != 0:
-                if sign is None:
-                    sign = cp > 0
-                elif sign != (cp > 0):
-                    return False
-        return True
-    
-    @property
-    def lines(self):
-        return list(pairwise(self.points)) + [(self.points[len(self.points)-1], self.points[0])]
+def rect_points(rect: pg.Rect, /):
+    return [pg.Vector2(rect.bottomleft), pg.Vector2(rect.bottomright), pg.Vector2(rect.topright), pg.Vector2(rect.topleft)]
 
-    def draw(self, window):
-        pg.draw.polygon(window, "#FFFFFF", tuple(self.points))
-    
-    def to_convex_polygons(self):
-        if self.convex:
-            return [self.points]
-        else:
-            raise NotImplementedError
+
+class WallGrid(dict[tuple[int, int], bool]):
+    def __missing__(self, _):
+        return False
 
 
 def sign(x):
@@ -66,7 +50,8 @@ def remove_duplicates(l: list, /):
         l.remove(i)
 
 
-def draw_shadows(window: pg.Surface, walls: list[Polygon], pos: pg.Vector2):
+def draw_shadows(walls: list[Wall], pos: pg.Vector2) -> list[list[pg.Vector2]]:
+    shadows = []
     for wall in walls:
         lines = wall.lines
         points = deque(wall.points)
@@ -97,14 +82,14 @@ def draw_shadows(window: pg.Surface, walls: list[Polygon], pos: pg.Vector2):
             for i in points:
                 if not in_shadow:
                     if i in points_on_non_illuminated_lines:
-                        shadow.append(pg.Vector2(i) + (pg.Vector2(i) - pos).normalize() * 10000)
+                        shadow.append(i + (i - pos).normalize() * 10000)
                     if i in points_on_illuminated_lines:
-                        shadow.append(pg.Vector2(i))
+                        shadow.append(i)
                 else:
                     if i in points_on_illuminated_lines:
-                        shadow.append(pg.Vector2(i))
+                        shadow.append(i)
                     if i in points_on_non_illuminated_lines:
-                        shadow.append(pg.Vector2(i) + (pg.Vector2(i) - pos).normalize() * 10000)
+                        shadow.append(i + (i - pos).normalize() * 10000)
                 if i in points_on_illuminated_lines and i in points_on_non_illuminated_lines:
                     in_shadow = not in_shadow
             
@@ -114,16 +99,67 @@ def draw_shadows(window: pg.Surface, walls: list[Polygon], pos: pg.Vector2):
                     done = True
             if done:
                 break 
+        shadows.append(shadow)
+    return shadows
 
-        pg.draw.polygon(window, 0, shadow)
+
+class Camera:
+    pos: pg.Vector2
+    rot: float
+    window_size: pg.Vector2
+
+    def __init__(self, pos: pg.Vector2 | tuple[float, float], rot: float, window_size: pg.Vector2 | tuple[int, int]):
+        self.pos = pg.Vector2(pos)
+        self.rot = rot
+        self.window_size = pg.Vector2(window_size)
+
+    @property
+    def fwd(self):
+        up = pg.Vector2(0, -1)
+        return up.rotate(self.rot)
+    
+    def transform(self, p: pg.Vector2, /):
+        return (p - self.pos).rotate(-self.rot) + self.window_size/2
+    
+    def reverse_transform(self, p: pg.Vector2, /):
+        return p.rotate(self.rot) + self.pos - self.window_size/2
+
+
+class Wall(pg.Rect):
+    @property
+    def points(self):
+        return [
+            pg.Vector2(self.bottomleft),
+            pg.Vector2(self.bottomright),
+            pg.Vector2(self.topright),
+            pg.Vector2(self.topleft)
+        ]
+    
+    @property
+    def lines(self):
+        return [
+            (pg.Vector2(self.bottomleft), pg.Vector2(self.bottomright)),
+            (pg.Vector2(self.bottomright), pg.Vector2(self.topright)),
+            (pg.Vector2(self.topright), pg.Vector2(self.topleft)),
+            (pg.Vector2(self.topleft), pg.Vector2(self.bottomleft))
+        ]
+
+    def transform(self, camera: Camera) -> list[pg.Vector2]:
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        transformed = self.scale_by(1/shorter_window_dimension, 1/shorter_window_dimension)
+        points = transformed.points
+        points = [camera.transform(i) for i in points]
+        return points
 
 
 def main():
     window = pg.display.set_mode(flags=pg.FULLSCREEN)
-    walls = [Polygon([pg.Vector2(100, 200), pg.Vector2(200, 300), pg.Vector2(200, 100), pg.Vector2(100, 100)])]
+    walls = [Wall(0.25, 0.25, 0.25, 0.5)]
 
     player_pos = pg.Vector2(600, 600)
     player_dir = 0
+
+    camera = Camera(player_pos, player_dir, window.get_size())
 
     up = pg.Vector2(0, -1)
 
@@ -143,13 +179,16 @@ def main():
         player_pos += player_fwd * player_motion
         player_dir += player_rot_motion
 
+        camera.pos = player_pos
+        camera.rot = player_dir
+
         window.fill("#555555")
         player_light.fill(0)
 
         for wall in walls:
-            wall.draw(window)
+            wall.draw(window, camera)
 
-        pg.draw.circle(window, "#FFFF00", player_pos, 10)
+        pg.draw.circle(window, "#FFFF00", player_pos, 15)
         pg.draw.circle(player_light, "#FFFFFF", player_pos, 20)
         pg.draw.polygon(player_light, "#FFFFFF", tuple([player_pos] + [player_fwd.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST + player_pos for i in range(FOV * FOV_RES)]))
         draw_shadows(player_light, walls, player_pos)
