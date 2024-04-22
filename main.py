@@ -1,9 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from functools import reduce
 from itertools import pairwise
 from math import copysign
-import operator
 from typing import Any
 import pygame as pg
 from sys import exit
@@ -50,11 +47,11 @@ def remove_duplicates(l: list, /):
         l.remove(i)
 
 
-def draw_shadows(walls: list[Wall], pos: pg.Vector2) -> list[list[pg.Vector2]]:
+def get_shadows(walls: list[Wall], pos: pg.Vector2, camera: Camera) -> list[list[pg.Vector2]]:
     shadows = []
     for wall in walls:
-        lines = wall.lines
-        points = deque(wall.points)
+        lines = wall.transform_lines(camera)
+        points = deque(wall.transform(camera))
         points_on_illuminated_lines = []
         points_on_non_illuminated_lines = []
         for line in lines:
@@ -125,7 +122,45 @@ class Camera:
         return p.rotate(self.rot) + self.pos - self.window_size/2
 
 
-class Wall(pg.Rect):
+class Wall:
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def __init__(self, x, y, width, height):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.temp = None
+        self.light_overlay = None
+        self.temp_window = None
+
+    def scale_by(self, x, y):
+        return type(self)(self.x*x, self.y*y, self.width*x, self.height*y)
+
+    @property
+    def bottomleft(self):
+        return self.x, self.y + self.height
+    
+
+    @property
+    def bottomright(self):
+        return self.x + self.width, self.y + self.height
+    
+    @property
+    def topright(self):
+        return self.x + self.width, self.y
+    
+    @property
+    def topleft(self):
+        return self.x, self.y
+
+    @property
+    def center(self):
+        return pg.Vector2(self.x + self.width/2, self.y + self.height/2)
+
     @property
     def points(self):
         return [
@@ -144,24 +179,177 @@ class Wall(pg.Rect):
             (pg.Vector2(self.topleft), pg.Vector2(self.bottomleft))
         ]
 
-    def transform(self, camera: Camera) -> list[pg.Vector2]:
+    def sdf(self, p: pg.Vector2):
+        p = pg.Vector2(abs((p-self.center).x), abs((p-self.center).y))
+        x_dist =  p.x - self.width/2
+        y_dist =  p.y - self.height/2
+        c_dist = p.distance_to(pg.Vector2(self.width, self.height)/2)
+        return c_dist if x_dist > 0 and y_dist > 0 else max(x_dist, y_dist)
+
+    def transform(self, camera: Camera):
         shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
-        transformed = self.scale_by(1/shorter_window_dimension, 1/shorter_window_dimension)
+        transformed = self.scale_by(shorter_window_dimension, shorter_window_dimension)
         points = transformed.points
         points = [camera.transform(i) for i in points]
         return points
+    
+    def transform_lines(self, camera: Camera):
+        points = self.transform(camera)
+        return list(pairwise(points)) + [(points[len(points)-1], points[0])]
+    
+    def draw(self, window: pg.Surface, camera: Camera, player: Player, walls: list[Wall]):
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        transformed_pos, transformed_dir = player.transform(camera)
+        if self.light_overlay is None:
+            self.light_overlay = pg.Surface(window.get_size())
+        if self.temp_window is None:
+            self.temp_window = pg.Surface(window.get_size(), flags=pg.SRCALPHA)
+        self.temp_window.fill(pg.Color(0, 0, 0, 0))
+        self.light_overlay.fill(0)
+        shadows_a, shadows_b = player.shadows_a.copy(), player.shadows_b.copy()
+        shadows_a.remove(shadows_a[walls.index(self)])
+        shadows_b.remove(shadows_b[walls.index(self)])
+
+        light_a, light_b = player.pos*shorter_window_dimension + player.fwd.rotate(-45)*0.02*shorter_window_dimension, player.pos*shorter_window_dimension + player.fwd.rotate(45)*0.02*shorter_window_dimension
+        transformed_pos, transformed_dir = player.transform(camera)
+        light_a, light_b = camera.transform(light_a), camera.transform(light_b)
+        dir_a, dir_b = transformed_dir - 2, transformed_dir + 2
+        fwd_a, fwd_b = pg.Vector2(0, -1).rotate(dir_a), pg.Vector2(0, -1).rotate(dir_b)
+        
+        if self.temp is None:
+            self.temp = pg.Surface(self.light_overlay.get_size())
+        self.temp.fill(0)
+        pg.draw.polygon(
+            self.temp,
+            "#888888",
+            tuple(
+                [light_a]
+                +[fwd_a.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST*shorter_window_dimension + light_a for i in range(FOV * FOV_RES)]
+                )
+            )
+        for s in shadows_a:
+            pg.draw.polygon(self.temp, 0, s)
+        self.light_overlay.blit(self.temp, (0, 0), special_flags=pg.BLEND_ADD)
+        
+        self.temp.fill(0)
+        pg.draw.polygon(
+            self.temp,
+            "#888888",
+            tuple(
+                [light_b]
+                +[fwd_b.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST*shorter_window_dimension + light_b for i in range(FOV * FOV_RES)]
+                )
+            )
+        for s in shadows_b:
+            pg.draw.polygon(self.temp, 0, s)
+        self.light_overlay.blit(self.temp, (0, 0), special_flags=pg.BLEND_ADD)
+
+        pg.draw.circle(self.light_overlay, "#888888", transformed_pos, 0.03*shorter_window_dimension)
+
+        points = self.transform(camera)
+        top_points = [(i-camera.window_size/2) * 1.2 + camera.window_size/2 for i in points]
+        wall_polys = []
+        poly_light_levels = []
+
+        for poly in list(pairwise(zip(points, top_points))) + [(list(zip(points, top_points))[len(list(zip(points, top_points)))-1], list(zip(points, top_points))[0])]:
+            vline_a, vline_b = poly
+            a, b = vline_a
+            c, d = vline_b
+
+            og_normal = (c - a).normalize().rotate(90)
+            center = (c + a)/2
+
+            if og_normal.dot(center - transformed_pos) < 0:
+                wall_polys.append((a, b, d, c))
+                poly_light_levels.append(pg.math.clamp(og_normal.dot((transformed_pos - center).normalize()), 0, 1))
+
+        for a, b in zip(wall_polys, poly_light_levels):
+            col = pg.Color(int(b*200), int(b*200), int(b*200))
+            pg.draw.polygon(self.temp_window, col, a)
+        
+        self.temp_window.blit(self.light_overlay, (0, 0), special_flags=pg.BLEND_MULT)
+        window.blit(self.temp_window, (0, 0))
+
+
+class Player:
+    pos: pg.Vector2
+    dir: float
+
+    def __init__(self, pos: pg.Vector2 | tuple[float, float], dir: float):
+        self.pos = pg.Vector2(pos)
+        self.dir = dir
+    
+    @property
+    def fwd(self):
+        return pg.Vector2(0, -1).rotate(self.dir)
+    
+    def move(self, keys, walls, ms):
+        player_motion = 0.0002 * ms * (keys[pg.K_w] - keys[pg.K_s])
+        player_rot_motion = 0.1 * ms * (keys[pg.K_d] - keys[pg.K_a])
+        prev_pos = self.pos.copy()
+        self.pos += self.fwd * player_motion
+        for wall in walls:
+            if wall.sdf(self.pos) < 0.02:
+                self.pos = prev_pos
+        self.dir += player_rot_motion
+
+    def transform(self, camera: Camera):
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        return camera.transform(self.pos*shorter_window_dimension), self.dir - camera.rot
+    
+    def draw(self, window: pg.Surface, camera: Camera):
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        transformed_pos, _ = self.transform(camera)
+        pg.draw.circle(window, "#FFFF00", transformed_pos, 0.02*shorter_window_dimension)
+    
+    def draw_shadows(self, light_window: pg.Surface, walls: list[Wall], camera: Camera):
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        light_a, light_b = self.pos*shorter_window_dimension + self.fwd.rotate(-45)*0.02*shorter_window_dimension, self.pos*shorter_window_dimension + self.fwd.rotate(45)*0.02*shorter_window_dimension
+        transformed_pos, transformed_dir = self.transform(camera)
+        light_a, light_b = camera.transform(light_a), camera.transform(light_b)
+        dir_a, dir_b = transformed_dir - 2, transformed_dir + 2
+        fwd_a, fwd_b = pg.Vector2(0, -1).rotate(dir_a), pg.Vector2(0, -1).rotate(dir_b)
+
+        self.shadows_a = get_shadows(walls, light_a, camera)
+        temp = pg.Surface(light_window.get_size())
+        temp.fill(0)
+        pg.draw.polygon(
+            temp,
+            "#888888",
+            tuple(
+                [light_a]
+                +[fwd_a.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST*shorter_window_dimension + light_a for i in range(FOV * FOV_RES)]
+                )
+            )
+        for s in self.shadows_a:
+            pg.draw.polygon(temp, 0, s)
+        light_window.blit(temp, (0, 0), special_flags=pg.BLEND_ADD)
+        
+        self.shadows_b = get_shadows(walls, light_b, camera)
+        temp.fill(0)
+        pg.draw.polygon(
+            temp,
+            "#888888",
+            tuple(
+                [light_b]
+                +[fwd_b.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST*shorter_window_dimension + light_b for i in range(FOV * FOV_RES)]
+                )
+            )
+        for s in self.shadows_b:
+            pg.draw.polygon(temp, 0, s)
+        light_window.blit(temp, (0, 0), special_flags=pg.BLEND_ADD)
+        
+        pg.draw.circle(light_window, "#888888", transformed_pos, 0.03*shorter_window_dimension)
 
 
 def main():
     window = pg.display.set_mode(flags=pg.FULLSCREEN)
-    walls = [Wall(0.25, 0.25, 0.25, 0.5)]
+    walls = [Wall(0.1, 0.1, 0.1, 0.1)]
 
-    player_pos = pg.Vector2(600, 600)
-    player_dir = 0
+    player = Player(pg.Vector2(0.5, 0.5), 0)
 
-    camera = Camera(player_pos, player_dir, window.get_size())
-
-    up = pg.Vector2(0, -1)
+    shorter_window_dimension: float = min(window.get_size()[0], window.get_size()[1])
+    camera = Camera(player.pos*shorter_window_dimension, player.dir, window.get_size())
 
     player_light = pg.Surface(window.get_size())
 
@@ -171,32 +359,27 @@ def main():
         for event in pg.event.get():
             if event.type == pg.QUIT or event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
                 exit()
-        player_fwd = up.rotate(player_dir)
-
+        
         keys = pg.key.get_pressed()
-        player_motion = 0.1 * ms * (keys[pg.K_w] - keys[pg.K_s])
-        player_rot_motion = 0.1 * ms * (keys[pg.K_d] - keys[pg.K_a])
-        player_pos += player_fwd * player_motion
-        player_dir += player_rot_motion
+        player.move(keys, walls, ms)
 
-        camera.pos = player_pos
-        camera.rot = player_dir
+        shorter_window_dimension: float = min(camera.window_size.x, camera.window_size.y)
+        camera.pos = player.pos*shorter_window_dimension
+        camera.rot = player.dir
 
         window.fill("#555555")
         player_light.fill(0)
 
-        for wall in walls:
-            wall.draw(window, camera)
+        player.draw(window, camera)
 
-        pg.draw.circle(window, "#FFFF00", player_pos, 15)
-        pg.draw.circle(player_light, "#FFFFFF", player_pos, 20)
-        pg.draw.polygon(player_light, "#FFFFFF", tuple([player_pos] + [player_fwd.rotate(-45/2 + i/FOV_RES)*PLAYER_VIEW_DST + player_pos for i in range(FOV * FOV_RES)]))
-        draw_shadows(player_light, walls, player_pos)
-
+        player.draw_shadows(player_light, walls, camera)
         window.blit(player_light, (0, 0), special_flags=pg.BLEND_MULT)
 
+        for wall in walls:
+            wall.draw(window, camera, player, walls)
+
         pg.display.flip()
-        ms = clock.tick()
+        ms = clock.tick(60)
 
 
 if __name__ == "__main__":
