@@ -9,14 +9,14 @@
             "type": "debugpy",
             "request": "launch",
             "program": "main.py",
-            "console": "internalConsole"
+            "console": "integratedTerminal"
         },
         {
             "name": "Python Debugger: editor_test.py",
             "type": "debugpy",
             "request": "launch",
             "program": "editor_test.py",
-            "console": "internalConsole"
+            "console": "integratedTerminal"
         }
     ]
 }

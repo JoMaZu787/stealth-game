@@ -337,6 +337,25 @@ class Guard:
         for s in self.shadows:
             pg.draw.polygon(temp, 0, s)
         light_window.blit(temp, (0, 0), special_flags=pg.BLEND_ADD)
+    
+    def editor_light(self, light_window: pg.Surface, camera: EditorCamera):
+        transformed_pos = camera.transform(self.pos)
+        temp = pg.Surface(light_window.get_size())
+        temp.fill(0)
+        pg.draw.polygon(
+            temp,
+            "#222222",
+            tuple(
+                [transformed_pos]
+                +[self.fwd.rotate(-self.fov/2 + i/FOV_RES)*camera.transform(self.view_dst) + transformed_pos for i in range(self.fov * FOV_RES)]
+                )
+            )
+        pg.draw.circle(temp, "#222222", transformed_pos, camera.transform(0.02))
+        light_window.blit(temp, (0, 0), special_flags=pg.BLEND_ADD)
+    
+    def editor_draw(self, window: pg.surface, camera: EditorCamera):
+        pg.draw.circle(window, '#FF0000', camera.transform(self.pos), camera.transform(0.01))
+        pg.draw.arc(window, ())
 
 
 class Player:
@@ -446,6 +465,8 @@ class Player:
 
 
 def main():
+    global global_timer_ms
+
     window = pg.display.set_mode(flags=pg.FULLSCREEN, vsync=1)
     window_size = window.get_size()
     mode = Mode.EDIT
@@ -525,6 +546,10 @@ def main():
             player.editor_light(editor_light, editor_camera)
             for wall in walls:
                 wall.editor_draw(window, editor_camera)
+            for guard in guards:
+                guard.update(ms)
+                guard.editor_draw(window, editor_camera)
+                guard.editor_light(editor_light, editor_camera)
             window.blit(editor_light, (0, 0), special_flags=pg.BLEND_ADD)
 
         pg.display.flip()
